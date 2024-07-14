@@ -3568,6 +3568,8 @@ version = "0.1.0"
 dependencies = [
  "colorful",
  "eframe",
+ "egui-wgpu",
+ "egui-winit",
  "egui_code_editor",
  "egui_extras",
  "env_logger",

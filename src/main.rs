@@ -224,45 +224,49 @@ impl eframe::App for MyApp {
 
                 // Chat area with scrolling
                 egui::ScrollArea::vertical().max_height(max_scroll_height).show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        for message in &self.current_session().messages {
-                            let text_color = match message.sender.as_str() {
-                                "user" => egui::Color32::from_rgb(72, 219, 120), // Green
-                                "API" => egui::Color32::from_rgb(66, 133, 244),  // Blue
-                                "system" => egui::Color32::from_rgb(234, 67, 53), // Red
-                                _ => egui::Color32::WHITE,
-                            };
+                ui.vertical(|ui| {
+                    for message in &self.current_session().messages {
+                        let text_color = match message.sender.as_str() {
+                            "user" => egui::Color32::from_rgb(72, 219, 120), // Green
+                            "API" => egui::Color32::from_rgb(66, 133, 244),  // Blue
+                            "system" => egui::Color32::from_rgb(234, 67, 53), // Red
+                            _ => egui::Color32::WHITE,
+                        };
 
-                            if message.content.contains("```") {
-                                // Display in text editor if message contains "```"
-                                let start_index = message.content.find("```").unwrap();
-                                let end_index = message.content[start_index + 3..].find("```")
-                                    .map(|i| start_index + 3 + i)
-                                    .unwrap_or_else(|| message.content.len());
+                        let mut remaining_content = &message.content[..];
 
+                        while let Some(start_index) = remaining_content.find("```") {
+                            // Display non-code text before the code block
+                            ui.colored_label(text_color, &remaining_content[..start_index]);
+                            remaining_content = &remaining_content[start_index + 3..];
+
+                            // Find end of code block
+                            if let Some(end_index) = remaining_content.find("```") {
+                                // Display code block
+                                let code_content = &remaining_content[..end_index];
                                 ui.horizontal(|ui| {
-                                    ui.colored_label(text_color, &message.content[..start_index]);
+                                    ui.add(egui::TextEdit::multiline(&mut String::from(code_content)).text_color(text_color));
                                     ui.end_row();
                                 });
 
-                                let mut text_editor_content = message.content[start_index + 3..end_index].to_owned();
-                                ui.horizontal(|ui|{
-                                    ui.add(egui::TextEdit::multiline(&mut text_editor_content).text_color(text_color));
-                                    ui.end_row();
-                                });
-
-                                ui.horizontal(|ui|{
-                                    ui.colored_label(text_color, &message.content[end_index+3..]);
-                                    ui.end_row();
-                                });
+                                // Move past the end of the code block
+                                remaining_content = &remaining_content[end_index + 3..];
                             } else {
-                                // Display in label if message does not contain "```"
-                                ui.colored_label(text_color, message.content.clone());
+                                // No end delimiter found, display remaining content as text
+                                ui.colored_label(text_color, remaining_content);
+                                remaining_content = "";
                             }
-
-                            ui.separator();
                         }
-                    });
+
+                        // Display any remaining text after the last code block
+                        if !remaining_content.is_empty() {
+                            ui.colored_label(text_color, remaining_content);
+                        }
+
+                        ui.separator();
+                    }
+                });
+
                 });
 
                 ui.separator();
@@ -274,44 +278,50 @@ impl eframe::App for MyApp {
                         .text_color(egui::Color32::WHITE)
                     );
 
-                    if ui.button("Send").clicked() {
-                        if let Some(api) = self.api_list.get(self.selected_api_index) {
-                            let input_text = self.input.clone();
-                            let api_clone = api.clone();
-                            let runtime = Builder::new_current_thread()
-                                .enable_all()
-                                .build()
-                                .unwrap();
+                if ui.button("Send").clicked() {
+                    if let Some(api) = self.api_list.get(self.selected_api_index) {
+                        let input_text = self.input.clone();
+                        let api_clone = api.clone();
+                        let runtime = Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap();
 
-                            runtime.block_on(async {
-                                self.current_session().messages.push(Message {
-                                    sender: "user".to_owned(),
-                                    content: input_text.clone(),
-                                });
+                        runtime.block_on(async {
+                            self.current_session().messages.push(Message {
+                                sender: "user".to_owned(),
+                                content: input_text.clone(),
+                            });
 
-                                match self.send_message_to_api(&api_clone).await {
-                                    Ok(message) => {
-                                        self.current_session().messages.push(Message {
-                                            sender: "API".to_owned(),
-                                            content: message.clone(),
-                                        });
-                                        self.input = "".to_string();
+                            match self.send_message_to_api(&api_clone).await {
+                                Ok(message) => {
+                                    self.current_session().messages.push(Message {
+                                        sender: "API".to_owned(),
+                                        content: message.clone(),
+                                    });
+                                    self.input = "".to_string();
 
-                                        // Save sessions after sending
-                                        if let Err(err) = self.save_sessions("sessions.json") {
-                                            println!("Error saving sessions: {:?}", err);
-                                        }
-                                    }
-                                    Err(err) => {
-                                        self.current_session().messages.push(Message {
-                                            sender: "system".to_owned(),
-                                            content: format!("Error: {}", err),
-                                        });
+                                    // Save sessions after sending
+                                    if let Err(err) = self.save_sessions("sessions.json") {
+                                        println!("Error saving sessions: {:?}", err);
                                     }
                                 }
-                            });
-                        }
+                                Err(err) => {
+                                    self.current_session().messages.push(Message {
+                                        sender: "system".to_owned(),
+                                        content: format!("Error: {}", err),
+                                    });
+                                }
+                            }
+                        });
+                    } else {
+                        self.current_session().messages.push(Message {
+                            sender: "system".to_owned(),
+                            content: "Error: No API selected. Please configure and select an API before sending a message.".to_owned(),
+                        });
                     }
+                }
+
                     if ui.button("Configure API").clicked() {
                         self.show_config_window = !self.show_config_window;
                     }
@@ -383,10 +393,14 @@ fn main() -> eframe::Result<()> {
         println!("Sessions loaded successfully");
     }
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]), // Adjust viewport size as needed
-        ..Default::default()
-    };
+let options = eframe::NativeOptions {
+    viewport: egui::ViewportBuilder::default()
+        .with_inner_size([800.0, 600.0]) // Adjust viewport size as needed
+        .with_resizable(true) // Allow resizing
+        .with_decorations(true), // Show standard window decorations (title bar, close button, etc.)
+    ..Default::default()
+};
+
 
     // Run the application
     eframe::run_native(
